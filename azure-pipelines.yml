@@ -1,0 +1,80 @@
+trigger:
+- main
+
+pool:
+  vmImage: ubuntu-latest
+
+variables:
+- name: DEV_ENVIRONMENT
+  value: dev
+- name: QA_ENVIRONMENT
+  value: qa
+
+stages:
+- stage: TerraformValidate
+  jobs:
+  - job: TerraformValidateJob
+    continueOnError: false
+    steps:
+    - task: PublishPipelineArtifact@1
+      displayName: Publish Terraform Manifest Artifacts
+      inputs:
+        targetPath: '$(System.DefaultWorkingDirectory)/Terraform-manifest'
+        artifact: 'Terraform-manifest-out'
+        publishLocation: 'pipeline'
+    - task: TerraformCLI@2
+      displayName: Terraform Init
+      inputs:
+        command: 'init'
+        workingDirectory: '$(System.DefaultWorkingDirectory)/Terraform-manifest'
+        backendType: 'azurerm'
+        backendServiceArm: 'azure-service-rk'
+        backendAzureRmResourceGroupName: 'Ganesh-rg' # Ensure the correct resource group name
+        backendAzureRmStorageAccountName: 'ganeshstorageact'
+        backendAzureRmContainerName: 'ganeshstoragecontainer'
+        backendAzureRmKey: 'tfcluster.tfstate'
+        allowTelemetryCollection: false
+    - task: TerraformCLI@2
+      displayName: Terraform Validate
+      inputs:
+        command: 'validate'
+        workingDirectory: '$(System.DefaultWorkingDirectory)/Terraform-manifest'
+        allowTelemetryCollection: false
+
+- stage: DeployStorageAccount 
+  jobs:
+    - deployment: DeployDevStorageAccounts
+      displayName: Deploy Dev Storage Accounts
+      pool:
+        vmImage: ubuntu-latest
+      environment: $(DEV_ENVIRONMENT)
+      strategy:
+       runOnce:
+         deploy:
+           steps:
+           - task: TerraformCLI@2
+             displayName: Terraform Init
+             inputs:
+               command: 'init'
+               workingDirectory: '$(Pipeline.Workspace)/Terraform-manifest-out'
+               backendType: 'azurerm'
+               backendServiceArm: 'azure-service-rk'
+               backendAzureRmResourceGroupName: 'Ganesh-rg' # Ensure the correct resource group name
+               backendAzureRmStorageAccountName: 'ganeshstorageact'
+               backendAzureRmContainerName: 'ganeshstoragecontainer'
+               backendAzureRmKey: 'tfcluster.tfstate'
+               allowTelemetryCollection: false
+           - task: TerraformCLI@2
+             displayName: Terraform Plan
+             inputs:
+               command: 'plan'
+               workingDirectory: '$(Pipeline.Workspace)/Terraform-manifest-out'
+               environmentServiceName: 'azure-service-rk'
+               allowTelemetryCollection: false
+           - task: TerraformCLI@2
+             displayName: Terraform Apply
+             inputs:
+               command: 'apply'
+               workingDirectory: '$(Pipeline.Workspace)/Terraform-manifest-out'
+               environmentServiceName: 'azure-service-rk'
+               allowTelemetryCollection: false
